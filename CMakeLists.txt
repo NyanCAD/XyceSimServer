@@ -13,3 +13,4 @@ NeuronModels
 teuchoscore 
 )
 target_include_directories(XyceSimServer PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+install(TARGETS XyceSimServer)
