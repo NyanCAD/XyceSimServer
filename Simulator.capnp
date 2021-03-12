@@ -4,7 +4,7 @@ interface Simulator {
     loadFiles @0 (files :List(File)) -> (commands :List(Command));
 
     interface Run {
-        run @0 () -> (result :Result);
+        run @0 (vectors :List(Text)) -> (result :Result);
     }
 
     interface Tran {
