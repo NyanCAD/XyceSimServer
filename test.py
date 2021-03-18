@@ -1,5 +1,5 @@
 import capnp
-import Simulator_capnp
+import api.Simulator_capnp as api
 import matplotlib.pyplot as plt
 from cmath import phase
 import numpy as np
@@ -15,10 +15,11 @@ C2 2 0 1u
 """
 print(ckt)
 
-sim = capnp.TwoPartyClient('localhost:5923').bootstrap().cast_as(Simulator_capnp.Simulator)
+sim = capnp.TwoPartyClient('localhost:5923').bootstrap().cast_as(api.Simulator)
 res = sim.loadFiles([{"name": "bar.sp", "contents": ckt}]).wait()
 
-raw_vectors = res.commands[0].run.run(["V(*)", "I(*)", "FREQ"]).result.readAll().wait()
+runner = res.commands.as_interface(api.Run)
+raw_vectors = runner.run(["V(*)", "I(*)", "FREQ"]).result.readAll().wait()
 print(raw_vectors)
 vectors = {}
 for vec in raw_vectors.data:

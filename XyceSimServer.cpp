@@ -1,4 +1,4 @@
-#include "Simulator.capnp.h"
+#include "api/Simulator.capnp.h"
 #include <kj/debug.h>
 #include <kj/filesystem.h>
 #include <kj/exception.h>
@@ -101,7 +101,7 @@ public:
     std::vector<std::vector<std::complex<double>>> complex_data;
 };
 
-class ResultImpl final : public Simulator::Result::Server
+class ResultImpl final : public Sim::Result::Server
 {
 public:
     ResultImpl(kj::Own<Xyce::Circuit::GenCouplingSimulator> &&xyceref, std::vector<std::string> vecs) : xyce(kj::mv(xyceref))
@@ -168,17 +168,12 @@ public:
         }
         return kj::READY_NOW;
     }
-    kj::Promise<void> seek(SeekContext context)
-    {
-
-        return kj::READY_NOW;
-    }
 
     kj::Own<Xyce::Circuit::GenCouplingSimulator> xyce;
     std::vector<kj::Own<OutputHandler>> handlers;
 };
 
-class RunImpl final : public Simulator::Run::Server
+class RunImpl final : public Sim::Run::Server
 {
 public:
     RunImpl(std::vector<std::string> args) : args(args) {}
@@ -208,7 +203,7 @@ public:
         {
             vecs.push_back(v);
         }
-        Simulator::Run::RunResults::Builder res = context.getResults();
+        Sim::Run::RunResults::Builder res = context.getResults();
         auto reader = kj::heap<ResultImpl>(kj::mv(xyce), vecs);
         res.setResult(kj::mv(reader));
         return kj::READY_NOW;
@@ -216,7 +211,7 @@ public:
     std::vector<std::string> args;
 };
 
-class SimulatorImpl final : public Simulator::Server
+class SimulatorImpl final : public Sim::Simulator<Sim::Run>::Server
 {
 public:
     SimulatorImpl(const kj::Directory &dir, std::vector<std::string> args) : dir(dir), args(args) {}
@@ -224,7 +219,7 @@ public:
     kj::Promise<void> loadFiles(LoadFilesContext context) override
     {
         auto files = context.getParams().getFiles();
-        for (Simulator::File::Reader f : files)
+        for (Sim::File::Reader f : files)
         {
             kj::Path path = kj::Path::parse(f.getName());
             kj::Own<const kj::File> file = dir.openFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -235,10 +230,9 @@ public:
         std::vector<std::string> tmpargs = args;
         tmpargs.push_back(files[0].getName());
 
-        Simulator::LoadFilesResults::Builder res = context.getResults();
-        auto cmd = res.initCommands(1);
+        auto res = context.getResults();
         auto runner = kj::heap<RunImpl>(tmpargs);
-        cmd[0].setRun(kj::mv(runner));
+        res.setCommands(kj::mv(runner));
         return kj::READY_NOW;
     }
 
