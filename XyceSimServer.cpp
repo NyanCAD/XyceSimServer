@@ -211,7 +211,7 @@ public:
     std::vector<std::string> args;
 };
 
-class SimulatorImpl final : public Sim::Simulator<Sim::Run>::Server
+class SimulatorImpl final : public Sim::Xyce::Server
 {
 public:
     SimulatorImpl(const kj::Directory &dir, std::vector<std::string> args) : dir(dir), args(args) {}

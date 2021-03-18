@@ -15,11 +15,10 @@ C2 2 0 1u
 """
 print(ckt)
 
-sim = capnp.TwoPartyClient('localhost:5923').bootstrap().cast_as(api.Simulator)
+sim = capnp.TwoPartyClient('localhost:5923').bootstrap().cast_as(api.Xyce)
 res = sim.loadFiles([{"name": "bar.sp", "contents": ckt}]).wait()
 
-runner = res.commands.as_interface(api.Run)
-raw_vectors = runner.run(["V(*)", "I(*)", "FREQ"]).result.readAll().wait()
+raw_vectors = res.commands.run(["V(*)", "I(*)", "FREQ"]).result.readAll().wait()
 print(raw_vectors)
 vectors = {}
 for vec in raw_vectors.data:
