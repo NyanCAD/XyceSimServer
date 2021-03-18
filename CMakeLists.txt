@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to be used")
 
 find_package(CapnProto CONFIG REQUIRED)
 
-capnp_generate_cpp(SimulatorSources SimulatorHeaders Simulator.capnp)
+capnp_generate_cpp(SimulatorSources SimulatorHeaders api/Simulator.capnp)
 add_executable(XyceSimServer XyceSimServer.cpp ${SimulatorSources})
 target_link_libraries(XyceSimServer PRIVATE CapnProto::capnp-rpc
 xyce
