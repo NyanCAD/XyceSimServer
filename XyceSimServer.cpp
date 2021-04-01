@@ -2,6 +2,7 @@
 #include <kj/debug.h>
 #include <kj/filesystem.h>
 #include <kj/exception.h>
+#include <kj/thread.h>
 #include <capnp/ez-rpc.h>
 #include <capnp/message.h>
 #include <iostream>
@@ -20,7 +21,7 @@ class OutputHandler final : public Xyce::IO::ExternalOutputInterface
 {
 public:
     OutputHandler(std::string name, Xyce::IO::OutputType::OutputType type, std::vector<std::string> outputs)
-        : requested_fieldnames(outputs), type(type), name(name) {}
+        : requested_fieldnames(outputs), type(type), name(name), running(true), selected(false) {}
 
     std::string getName()
     {
@@ -47,16 +48,20 @@ public:
 
     void outputFieldNames(std::vector<std::string> &outputNames)
     {
+        *selected.lockExclusive() = true;
+        auto fn = fieldnames.lockExclusive();
+        auto rd = real_data.lockExclusive();
+        auto cd = complex_data.lockExclusive();
         for (int i = 0; i < numsteps; i++)
         {
             for (auto field : outputNames)
             {
                 auto num = std::to_string(i);
-                fieldnames.push_back(name + num + "_" + field);
+                fn->push_back(name + num + "_" + field);
             }
         }
-        real_data.resize(outputNames.size() * numsteps);
-        complex_data.resize(outputNames.size() * numsteps);
+        rd->resize(outputNames.size() * numsteps);
+        cd->resize(outputNames.size() * numsteps);
     }
 
     void newStepOutput(int stepNumber, int maxStep)
@@ -67,38 +72,38 @@ public:
 
     void outputReal(std::vector<double> &outputData)
     {
+        auto rd = real_data.lockExclusive();
         for (int i = 0; i < outputData.size(); i++)
         {
             int idx = outputData.size() * step + i;
-            real_data[idx].push_back(outputData[i]);
+            (*rd)[idx].push_back(outputData[i]);
         }
     }
 
     void outputComplex(std::vector<std::complex<double>> &outputData)
     {
+        auto cd = complex_data.lockExclusive();
         for (int i = 0; i < outputData.size(); i++)
         {
             int idx = outputData.size() * step + i;
-            complex_data[idx].push_back(outputData[i]);
+            (*cd)[idx].push_back(outputData[i]);
         }
     }
 
-    void clear()
-    {
-        for (auto data : real_data)
-        {
-            data.clear();
-        }
-    }
+    void finishOutput() {
+        *running.lockExclusive() = false;
+    };
 
     std::string name;
     int step = 0;
     int numsteps = 1;
     Xyce::IO::OutputType::OutputType type;
     std::vector<std::string> requested_fieldnames;
-    std::vector<std::string> fieldnames;
-    std::vector<std::vector<double>> real_data;
-    std::vector<std::vector<std::complex<double>>> complex_data;
+    kj::MutexGuarded<std::vector<std::string>> fieldnames;
+    kj::MutexGuarded<std::vector<std::vector<double>>> real_data;
+    kj::MutexGuarded<std::vector<std::vector<std::complex<double>>>> complex_data;
+    kj::MutexGuarded<bool> running;
+    kj::MutexGuarded<bool> selected;
 };
 
 class ResultImpl final : public Sim::Result::Server
@@ -116,61 +121,65 @@ public:
         {
             xyce->addOutputInterface(handler);
         }
+        thread = kj::heap<kj::Thread>([this]() { this->xyce->runSimulation(); });
     }
 
     kj::Promise<void> read(ReadContext context)
     {
-
-        return kj::READY_NOW;
-    }
-    kj::Promise<void> readTime(ReadTimeContext context)
-    {
-
-        return kj::READY_NOW;
-    }
-    kj::Promise<void> readAll(ReadAllContext context)
-    {
-        xyce->runSimulation();
-
-        int totalfields = 0;
-        for (auto &handler : handlers)
+        OutputHandler* handler = nullptr;
+        for (auto &h : handlers)
         {
-            totalfields += handler->fieldnames.size();
-        }
-        auto res = context.getResults().initData(totalfields);
-        for (auto &handler : handlers)
-        {
-            size_t size = handler->fieldnames.size();
-            for (size_t i = 0; i < size; i++)
-            {
-                res[i].setName(handler->fieldnames[i]);
-                auto dat = res[i].getData();
-                if (!handler->complex_data[i].empty())
-                {
-                    auto simdat = handler->complex_data[i];
-                    auto list = dat.initComplex(simdat.size());
-                    for (size_t j = 0; j < simdat.size(); j++)
-                    {
-                        list[j].setReal(simdat[j].real());
-                        list[j].setImag(simdat[j].imag());
-                    }
-                }
-                else if (!handler->real_data[i].empty())
-                {
-                    auto simdat = handler->real_data[i];
-                    auto list = dat.initReal(simdat.size());
-                    for (size_t j = 0; j < simdat.size(); j++)
-                    {
-                        list.set(j, simdat[j]);
-                    }
-                } // else no data apparently
+            if(*h->selected.lockExclusive()) {
+                handler = h.get();
+                break;
             }
+        }
+        if(handler == nullptr) {
+            context.getResults().setMore(true);
+            return kj::READY_NOW;
+        }
+        auto fieldnames = handler->fieldnames.lockExclusive();
+        auto real_data = handler->real_data.lockExclusive();
+        auto complex_data = handler->complex_data.lockExclusive();
+
+        auto res = context.getResults();
+        if(!fieldnames->empty()) {
+            res.setScale((*fieldnames)[0].c_str()); // Xyce prepends TIME / FREQ vector if not given
+        }
+        res.setMore(*handler->running.lockExclusive());
+        auto datlist = res.initData(fieldnames->size());
+        for (size_t i = 0; i < fieldnames->size(); i++)
+        {
+            datlist[i].setName((*fieldnames)[i]);
+            auto dat = datlist[i].getData();
+            if (!(*complex_data)[i].empty())
+            {
+                auto simdat = (*complex_data)[i];
+                auto list = dat.initComplex(simdat.size());
+                for (size_t j = 0; j < simdat.size(); j++)
+                {
+                    list[j].setReal(simdat[j].real());
+                    list[j].setImag(simdat[j].imag());
+                }
+            }
+            else if (!(*real_data)[i].empty())
+            {
+                auto simdat = (*real_data)[i];
+                auto list = dat.initReal(simdat.size());
+                for (size_t j = 0; j < simdat.size(); j++)
+                {
+                    list.set(j, simdat[j]);
+                }
+            } // else no data apparently
+            (*real_data)[i].clear();
+            (*complex_data)[i].clear();
         }
         return kj::READY_NOW;
     }
 
     kj::Own<Xyce::Circuit::GenCouplingSimulator> xyce;
     std::vector<kj::Own<OutputHandler>> handlers;
+    kj::Own<kj::Thread> thread;
 };
 
 class RunImpl final : public Sim::Run::Server
@@ -248,7 +257,11 @@ int main(int argc, const char *argv[])
     const kj::Directory &dir = fs->getCurrent();
 
     // Set up a server.
-    capnp::EzRpcServer server(kj::heap<SimulatorImpl>(dir, arguments), "*:5923");
+    std::string listen = "*:5923";
+    if (argc == 2) {
+        listen = argv[1];
+    }
+    capnp::EzRpcServer server(kj::heap<SimulatorImpl>(dir, arguments), listen);
 
     auto &waitScope = server.getWaitScope();
     uint port = server.getPort().wait(waitScope);
