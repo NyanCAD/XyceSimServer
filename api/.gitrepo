@@ -6,7 +6,7 @@
 [subrepo]
 	remote = git@github.com:NyanCAD/SimServer.git
 	branch = main
-	commit = b71c7b34edb0e6f24bd2b5d92812fc9651504fd9
-	parent = 0b0eaabae0435de0b8eb7926245bbd4429dd81ee
+	commit = d61e1fc780f4da4bbcd91ce5f0b4ffe074906d79
+	parent = 2692ca5f9cf29355c866d97b1980580bfa0e1a29
 	method = merge
 	cmdver = 0.4.3
