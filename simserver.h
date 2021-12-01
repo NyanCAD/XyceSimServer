@@ -109,8 +109,23 @@ public:
 class ResultImpl final : public Sim::Result::Server
 {
 public:
-    ResultImpl(kj::Own<Xyce::Circuit::GenCouplingSimulator> &&xyceref, std::vector<std::string> vecs) : xyce(kj::mv(xyceref))
+    ResultImpl(std::string path, std::vector<std::string> vecs)
     {
+        xyce = kj::heap<Xyce::Circuit::GenCouplingSimulator>();
+        Xyce::set_report_handler(report_handler);
+        std::vector<const char *> tmpargs;
+        tmpargs.push_back("xyce");
+        tmpargs.push_back(path.c_str());
+        try
+        {
+            xyce->initializeEarly(tmpargs.size(), const_cast<char **>(tmpargs.data()));
+        }
+        catch (std::runtime_error &e)
+        {
+            xyce = nullptr;
+            e = std::runtime_error("Fatal error in parsing netlist, check logs");
+            throw;
+        }
         handlers.push_back(kj::heap<OutputHandler>("tran", Xyce::IO::OutputType::TRAN, vecs));
         handlers.push_back(kj::heap<OutputHandler>("ac", Xyce::IO::OutputType::AC, vecs));
         handlers.push_back(kj::heap<OutputHandler>("op", Xyce::IO::OutputType::DCOP, vecs));
@@ -120,7 +135,10 @@ public:
         for (auto &handler : handlers)
         {
             xyce->addOutputInterface(handler);
+            std::cout << "handler\n";
         }
+        xyce->initializeLate();
+        std::cout << "initialised\n";
         thread = kj::heap<kj::Thread>([this]() { this->xyce->runSimulation(); });
     }
 
@@ -185,27 +203,10 @@ public:
 class RunImpl final : public Sim::Run::Server
 {
 public:
-    RunImpl(std::vector<std::string> args) : args(args) {}
+    RunImpl(std::string path) : path(path) {}
 
     kj::Promise<void> run(RunContext context)
     {
-        auto xyce = kj::heap<Xyce::Circuit::GenCouplingSimulator>();
-        Xyce::set_report_handler(report_handler);
-        std::vector<const char *> tmpargs;
-        for (auto a : args)
-        {
-            tmpargs.push_back(a.c_str());
-        }
-        try
-        {
-            xyce->initialize(tmpargs.size(), const_cast<char **>(tmpargs.data()));
-        }
-        catch (std::runtime_error &e)
-        {
-            xyce = nullptr;
-            e = std::runtime_error("Fatal error in parsing netlist, check logs");
-            throw;
-        }
         auto cpvecs = context.getParams().getVectors();
         std::vector<std::string> vecs;
         for (auto v : cpvecs)
@@ -213,60 +214,12 @@ public:
             vecs.push_back(v);
         }
         Sim::Run::RunResults::Builder res = context.getResults();
-        auto reader = kj::heap<ResultImpl>(kj::mv(xyce), vecs);
+        auto reader = kj::heap<ResultImpl>(path, vecs);
         res.setResult(kj::mv(reader));
         return kj::READY_NOW;
     }
-    std::vector<std::string> args;
+    std::string path;
 };
 
-class SimulatorImpl final : public Sim::Xyce::Server
-{
-public:
-    SimulatorImpl(const kj::Directory &dir, std::vector<std::string> args) : dir(dir), args(args) {}
-
-    kj::Promise<void> loadFiles(LoadFilesContext context) override
-    {
-        auto files = context.getParams().getFiles();
-        for (Sim::File::Reader f : files)
-        {
-            kj::Path path = kj::Path::parse(f.getName());
-            kj::Own<const kj::File> file = dir.openFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-            file->truncate(0);
-            file->write(0, f.getContents());
-        }
-
-        std::vector<std::string> tmpargs = args;
-        tmpargs.push_back(files[0].getName());
-
-        auto res = context.getResults();
-        auto runner = kj::heap<RunImpl>(tmpargs);
-        res.setCommands(kj::mv(runner));
-        return kj::READY_NOW;
-    }
-
-    std::vector<std::string> args;
-    const kj::Directory &dir;
-};
-
-int main(int argc, const char *argv[])
-{
-    std::vector<std::string> arguments(argv, argv + argc);
-
-    kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
-    const kj::Directory &dir = fs->getCurrent();
-
-    // Set up a server.
-    std::string listen = "*:5923";
-    if (argc == 2) {
-        listen = argv[1];
-    }
-    capnp::EzRpcServer server(kj::heap<SimulatorImpl>(dir, arguments), listen);
-
-    auto &waitScope = server.getWaitScope();
-    uint port = server.getPort().wait(waitScope);
-    std::cout << "Listening on port " << port << "..." << std::endl;
-
-    // Run forever, accepting connections and handling requests.
-    kj::NEVER_DONE.wait(waitScope);
-}
+typedef Sim::Run SimCommands;
+typedef RunImpl SimCommandsImpl;

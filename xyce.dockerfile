@@ -4,11 +4,13 @@ RUN apt-get update -qq && \
 DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
   ca-certificates \
   curl \
-  cmake \
   gcc \
-  make \
   g++ \
   gfortran \
+  make \
+  cmake \
+  bison \
+  flex \
   libfl-dev \
   libfftw3-dev \
   libsuitesparse-dev \
@@ -29,7 +31,7 @@ RUN mkdir -p Trilinos/trilinos-source && \
 curl -fsSL https://github.com/trilinos/Trilinos/archive/trilinos-release-12-12-1.tar.gz | \
 tar xz -C Trilinos/trilinos-source --strip-components=1 && \
 mkdir -p Xyce && \
-curl -fsSL https://xyce.sandia.gov/downloads/_assets/documents/Xyce-6.12.tar.gz | \
+curl -fsSL https://xyce.sandia.gov/downloads/_assets/documents/Xyce-7.4.tar.gz | \
 tar xz -C Xyce --strip-components=1
 
 ENV ARCHDIR=$XYCE_OUTDIR
