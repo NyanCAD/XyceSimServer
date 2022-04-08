@@ -17,6 +17,14 @@ void report_handler(const char *message, unsigned type)
     std::cout << message;
 }
 
+struct XyceVectors {
+    std::string name;
+    std::vector<std::string> fieldnames;
+    std::vector<std::vector<double>> real_data;
+    std::vector<std::vector<std::complex<double>>> complex_data;
+    kj::Maybe<unsigned int> scale;
+};
+
 class OutputHandler final : public Xyce::IO::ExternalOutputInterface
 {
 public:
@@ -49,19 +57,20 @@ public:
     void outputFieldNames(std::vector<std::string> &outputNames)
     {
         *selected.lockExclusive() = true;
-        auto fn = fieldnames.lockExclusive();
-        auto rd = real_data.lockExclusive();
-        auto cd = complex_data.lockExclusive();
+        auto vecs = vectors.lockExclusive();
         for (int i = 0; i < numsteps; i++)
         {
+            auto num = std::to_string(i);
+            XyceVectors step;
+            step.name = name + num;
             for (auto field : outputNames)
             {
-                auto num = std::to_string(i);
-                fn->push_back(name + num + "_" + field);
+                step.fieldnames.push_back(field);
             }
+            step.real_data.resize(outputNames.size());
+            step.complex_data.resize(outputNames.size());
+            vecs->push_back(step);
         }
-        rd->resize(outputNames.size() * numsteps);
-        cd->resize(outputNames.size() * numsteps);
     }
 
     void newStepOutput(int stepNumber, int maxStep)
@@ -72,21 +81,19 @@ public:
 
     void outputReal(std::vector<double> &outputData)
     {
-        auto rd = real_data.lockExclusive();
+        auto vecs = vectors.lockExclusive();
         for (int i = 0; i < outputData.size(); i++)
         {
-            int idx = outputData.size() * step + i;
-            (*rd)[idx].push_back(outputData[i]);
+            (*vecs)[step].real_data[i].push_back(outputData[i]);
         }
     }
 
     void outputComplex(std::vector<std::complex<double>> &outputData)
     {
-        auto cd = complex_data.lockExclusive();
+        auto vecs = vectors.lockExclusive();
         for (int i = 0; i < outputData.size(); i++)
         {
-            int idx = outputData.size() * step + i;
-            (*cd)[idx].push_back(outputData[i]);
+            (*vecs)[step].complex_data[i].push_back(outputData[i]);
         }
     }
 
@@ -99,9 +106,7 @@ public:
     int numsteps = 1;
     Xyce::IO::OutputType::OutputType type;
     std::vector<std::string> requested_fieldnames;
-    kj::MutexGuarded<std::vector<std::string>> fieldnames;
-    kj::MutexGuarded<std::vector<std::vector<double>>> real_data;
-    kj::MutexGuarded<std::vector<std::vector<std::complex<double>>>> complex_data;
+    kj::MutexGuarded<std::vector<XyceVectors>> vectors;
     kj::MutexGuarded<bool> running;
     kj::MutexGuarded<bool> selected;
 };
@@ -156,41 +161,46 @@ public:
             context.getResults().setMore(true);
             return kj::READY_NOW;
         }
-        auto fieldnames = handler->fieldnames.lockExclusive();
-        auto real_data = handler->real_data.lockExclusive();
-        auto complex_data = handler->complex_data.lockExclusive();
-
+        auto vecs = handler->vectors.lockExclusive();
         auto res = context.getResults();
-        if(!fieldnames->empty()) {
-            res.setScale((*fieldnames)[0].c_str()); // Xyce prepends TIME / FREQ vector if not given
-        }
-        res.setMore(*handler->running.lockExclusive());
-        auto datlist = res.initData(fieldnames->size());
-        for (size_t i = 0; i < fieldnames->size(); i++)
-        {
-            datlist[i].setName((*fieldnames)[i]);
-            auto dat = datlist[i].getData();
-            if (!(*complex_data)[i].empty())
-            {
-                auto simdat = (*complex_data)[i];
-                auto list = dat.initComplex(simdat.size());
-                for (size_t j = 0; j < simdat.size(); j++)
-                {
-                    list[j].setReal(simdat[j].real());
-                    list[j].setImag(simdat[j].imag());
-                }
+        auto dat = res.initData(vecs->size());
+        for(size_t h = 0; h< vecs->size(); h++) {
+
+            auto fieldnames = (*vecs)[h].fieldnames;
+            auto real_data = (*vecs)[h].real_data;
+            auto complex_data = (*vecs)[h].complex_data;
+
+            if(!fieldnames.empty()) {
+                dat[h].setScale(fieldnames[0].c_str()); // Xyce prepends TIME / FREQ vector if not given
             }
-            else if (!(*real_data)[i].empty())
+            res.setMore(*handler->running.lockExclusive());
+            auto datlist = dat[h].initData(fieldnames.size());
+            for (size_t i = 0; i < fieldnames.size(); i++)
             {
-                auto simdat = (*real_data)[i];
-                auto list = dat.initReal(simdat.size());
-                for (size_t j = 0; j < simdat.size(); j++)
+                datlist[i].setName(fieldnames[i]);
+                auto dat = datlist[i].getData();
+                if (!complex_data[i].empty())
                 {
-                    list.set(j, simdat[j]);
+                    auto simdat = complex_data[i];
+                    auto list = dat.initComplex(simdat.size());
+                    for (size_t j = 0; j < simdat.size(); j++)
+                    {
+                        list[j].setReal(simdat[j].real());
+                        list[j].setImag(simdat[j].imag());
+                    }
                 }
-            } // else no data apparently
-            (*real_data)[i].clear();
-            (*complex_data)[i].clear();
+                else if (!real_data[i].empty())
+                {
+                    auto simdat = real_data[i];
+                    auto list = dat.initReal(simdat.size());
+                    for (size_t j = 0; j < simdat.size(); j++)
+                    {
+                        list.set(j, simdat[j]);
+                    }
+                } // else no data apparently
+                real_data[i].clear();
+                complex_data[i].clear();
+            }
         }
         return kj::READY_NOW;
     }
