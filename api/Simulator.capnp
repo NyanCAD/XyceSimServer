@@ -5,6 +5,7 @@ $Cxx.namespace("Sim");
 
 interface Simulator(Cmd) {
     loadFiles @0 (files :List(File)) -> (commands :Cmd);
+    loadPath @1 (file :Text) -> (commands :Cmd);
 }
 
 interface Run {
@@ -23,6 +24,14 @@ interface Ac {
     ac @0 (mode :AcType, num :UInt64, fstart :Float64, fstop :Float64, vectors :List(Text)) -> (result :Result);
 }
 
+interface Noise {
+    noise @0 (output :Text, src :Text, mode :AcType, num :UInt64, fstart :Float64, fstop :Float64, vectors :List(Text)) -> (result :Result);
+}
+
+interface Dc {
+    dc @0 (src :Text, vstart :Float64, vstop :Float64, vincr :Float64, vectors :List(Text)) -> (result :Result);
+}
+
 enum AcType {
     lin @0;
     dec @1;
@@ -30,7 +39,13 @@ enum AcType {
 }
 
 interface Result {
-    read @0 () -> (scale :Text, more :Bool, data :List(Vector));
+    read @0 () -> (more :Bool, data :List(Vectors), stdout :Text);
+}
+
+struct Vectors {
+    name @0 :Text;
+    scale @1 :Text;
+    data @2 :List(Vector);
 }
 
 struct Vector {
@@ -56,7 +71,7 @@ struct File {
 
 interface Xyce extends(Simulator(Run)) { }
 
-interface NgspiceCommands extends(Run, Tran, Op, Ac) {}
+interface NgspiceCommands extends(Run, Tran, Op, Dc, Ac, Noise) {}
 interface Ngspice extends(Simulator(NgspiceCommands)) { }
 
 interface Cxxrtl extends(Simulator(Run)) { }
