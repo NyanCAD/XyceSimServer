@@ -16,7 +16,9 @@ DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
   libsuitesparse-dev \
   libblas-dev \
   liblapack-dev \
-  libtool
+  libtool \
+  autoconf \
+  automake
 
 ENV XYCE_OUTDIR=/usr/local/
 ENV PATH="${PATH}:/tmp${XYCE_OUTDIR}bin"
@@ -31,7 +33,7 @@ RUN mkdir -p Trilinos/trilinos-source && \
 curl -fsSL https://github.com/trilinos/Trilinos/archive/trilinos-release-12-12-1.tar.gz | \
 tar xz -C Trilinos/trilinos-source --strip-components=1 && \
 mkdir -p Xyce && \
-curl -fsSL https://xyce.sandia.gov/downloads/_assets/documents/Xyce-7.4.tar.gz | \
+curl -fsSL https://github.com/Xyce/Xyce/archive/refs/tags/Release-7.4.0.tar.gz | \
 tar xz -C Xyce --strip-components=1
 
 ENV ARCHDIR=$XYCE_OUTDIR
@@ -82,7 +84,8 @@ make DESTDIR=/tmp -j$(nproc) install
 ENV xyceBuildDir=/opt/Xyce/xyce-build/
 
 # Build Xyce
-RUN mkdir xyce-build && cd xyce-build && \
+RUN cd Xyce && ./bootstrap && \
+cd .. && mkdir xyce-build && cd xyce-build && \
 ../Xyce/configure \
 CXXFLAGS="-O3 -std=c++11" \
 LDFLAGS="-Wl,-rpath=$xyceBuildDir/utils/XyceCInterface -Wl,-rpath=$xyceBuildDir/lib" \
