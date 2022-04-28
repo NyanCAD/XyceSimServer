@@ -3,6 +3,8 @@ FROM pepijndevos/xycesimserver:xyce AS build
 COPY . /tmp/build
 WORKDIR /tmp/build
 
+RUN DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends libboost-all-dev
+
 RUN mkdir -p build; \
 cd build; \
 cmake -DCMAKE_INSTALL_PREFIX="/usr/local" ..; \
