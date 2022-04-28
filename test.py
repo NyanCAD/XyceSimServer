@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2022 Pepijn de Vos
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import capnp
 import api.Simulator_capnp as api
 import matplotlib.pyplot as plt
